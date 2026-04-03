@@ -1,0 +1,79 @@
+name: 'Bun Setup with Cache'
+description: 'Setup Bun, cache node_modules across branches, and install dependencies in one step'
+branding:
+  icon: 'package'
+  color: 'orange'
+
+inputs:
+  bun-version:
+    description: 'Bun version to install'
+    required: false
+    default: 'latest'
+  working-directory:
+    description: 'Working directory for bun install'
+    required: false
+    default: '.'
+  frozen-lockfile:
+    description: 'Use --frozen-lockfile flag'
+    required: false
+    default: 'true'
+  cache-key-prefix:
+    description: 'Custom cache key prefix'
+    required: false
+    default: 'bun-deps'
+  node_modules-paths:
+    description: 'Newline-separated list of node_modules paths to cache (auto-detected if empty)'
+    required: false
+    default: ''
+
+outputs:
+  cache-hit:
+    description: 'Whether cache was restored (exact match)'
+    value: ${{ steps.cache.outputs.cache-hit }}
+  cache-restored:
+    description: 'Whether cache was restored (exact or partial via restore-keys)'
+    value: ${{ steps.cache.outputs.cache-matched-key != '' && 'true' || 'false' }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Setup Bun
+      uses: oven-sh/setup-bun@v2
+      with:
+        bun-version: ${{ inputs.bun-version }}
+
+    - name: Detect node_modules paths
+      id: detect
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        if [ -n "${{ inputs.node_modules-paths }}" ]; then
+          echo "paths<<EOF" >> $GITHUB_OUTPUT
+          echo "${{ inputs.node_modules-paths }}" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+        else
+          # Auto-detect: find all node_modules in workspaces (max depth 3)
+          PATHS=$(find . -maxdepth 3 -name "node_modules" -type d -not -path "*/node_modules/*/node_modules" | sort)
+          echo "paths<<EOF" >> $GITHUB_OUTPUT
+          echo "$PATHS" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Cache node_modules
+      id: cache
+      uses: actions/cache@v4
+      with:
+        path: ${{ steps.detect.outputs.paths }}
+        key: ${{ runner.os }}-${{ inputs.cache-key-prefix }}-${{ hashFiles('**/bun.lock', '**/bun.lockb') }}
+        restore-keys: |
+          ${{ runner.os }}-${{ inputs.cache-key-prefix }}-
+
+    - name: Install dependencies
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        if [ "${{ inputs.frozen-lockfile }}" = "true" ]; then
+          bun install --frozen-lockfile
+        else
+          bun install
+        fi
