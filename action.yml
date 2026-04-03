@@ -48,16 +48,42 @@ runs:
       working-directory: ${{ inputs.working-directory }}
       run: |
         if [ -n "${{ inputs.node_modules-paths }}" ]; then
-          echo "paths<<EOF" >> $GITHUB_OUTPUT
-          echo "${{ inputs.node_modules-paths }}" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
+          PATHS="${{ inputs.node_modules-paths }}"
         else
-          # Auto-detect: find all node_modules in workspaces (max depth 3)
-          PATHS=$(find . -maxdepth 3 -name "node_modules" -type d -not -path "*/node_modules/*/node_modules" | sort)
-          echo "paths<<EOF" >> $GITHUB_OUTPUT
-          echo "$PATHS" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
+          # Auto-detect from bun workspaces in package.json, or fall back to just node_modules
+          PATHS="node_modules"
+          if [ -f "package.json" ]; then
+            # Extract workspace patterns and convert to node_modules paths
+            WS=$(node -e "
+              try {
+                const pkg = require('./package.json');
+                const ws = pkg.workspaces || [];
+                const patterns = Array.isArray(ws) ? ws : (ws.packages || []);
+                const glob = require('path');
+                const fs = require('fs');
+                patterns.forEach(p => {
+                  // Handle glob patterns like 'apps/*' or 'packages/*'
+                  const base = p.replace(/\/?\*.*$/, '');
+                  if (fs.existsSync(base)) {
+                    fs.readdirSync(base).forEach(dir => {
+                      const full = base + '/' + dir;
+                      if (fs.statSync(full).isDirectory() && fs.existsSync(full + '/package.json')) {
+                        console.log(full + '/node_modules');
+                      }
+                    });
+                  }
+                });
+              } catch(e) {}
+            " 2>/dev/null)
+            if [ -n "$WS" ]; then
+              PATHS="node_modules
+        $WS"
+            fi
+          fi
         fi
+        echo "paths<<EOF" >> $GITHUB_OUTPUT
+        echo "$PATHS" >> $GITHUB_OUTPUT
+        echo "EOF" >> $GITHUB_OUTPUT
 
     - name: Cache node_modules
       id: cache
