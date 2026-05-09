@@ -1,5 +1,5 @@
-name: 'Bun Setup with Cache'
-description: 'Setup Bun, cache node_modules across branches, and install dependencies in one step'
+name: 'Bun Setup with Install'
+description: 'Setup Bun and install dependencies in one step'
 branding:
   icon: 'package'
   color: 'orange'
@@ -17,22 +17,6 @@ inputs:
     description: 'Use --frozen-lockfile flag'
     required: false
     default: 'true'
-  cache-key-prefix:
-    description: 'Custom cache key prefix'
-    required: false
-    default: 'bun-deps'
-  node_modules-paths:
-    description: 'Newline-separated list of node_modules paths to cache (auto-detected if empty)'
-    required: false
-    default: ''
-
-outputs:
-  cache-hit:
-    description: 'Whether cache was restored (exact match)'
-    value: ${{ steps.cache.outputs.cache-hit }}
-  cache-restored:
-    description: 'Whether cache was restored (exact or partial via restore-keys)'
-    value: ${{ steps.cache.outputs.cache-matched-key != '' && 'true' || 'false' }}
 
 runs:
   using: 'composite'
@@ -41,58 +25,6 @@ runs:
       uses: oven-sh/setup-bun@v2
       with:
         bun-version: ${{ inputs.bun-version }}
-
-    - name: Detect node_modules paths
-      id: detect
-      shell: bash
-      working-directory: ${{ inputs.working-directory }}
-      run: |
-        if [ -n "${{ inputs.node_modules-paths }}" ]; then
-          PATHS="${{ inputs.node_modules-paths }}"
-        else
-          # Auto-detect from bun workspaces in package.json, or fall back to just node_modules
-          PATHS="node_modules"
-          if [ -f "package.json" ]; then
-            # Extract workspace patterns and convert to node_modules paths
-            WS=$(node -e "
-              try {
-                const pkg = require('./package.json');
-                const ws = pkg.workspaces || [];
-                const patterns = Array.isArray(ws) ? ws : (ws.packages || []);
-                const glob = require('path');
-                const fs = require('fs');
-                patterns.forEach(p => {
-                  // Handle glob patterns like 'apps/*' or 'packages/*'
-                  const base = p.replace(/\/?\*.*$/, '');
-                  if (fs.existsSync(base)) {
-                    fs.readdirSync(base).forEach(dir => {
-                      const full = base + '/' + dir;
-                      if (fs.statSync(full).isDirectory() && fs.existsSync(full + '/package.json')) {
-                        console.log(full + '/node_modules');
-                      }
-                    });
-                  }
-                });
-              } catch(e) {}
-            " 2>/dev/null)
-            if [ -n "$WS" ]; then
-              PATHS="node_modules
-        $WS"
-            fi
-          fi
-        fi
-        echo "paths<<EOF" >> $GITHUB_OUTPUT
-        echo "$PATHS" >> $GITHUB_OUTPUT
-        echo "EOF" >> $GITHUB_OUTPUT
-
-    - name: Cache node_modules
-      id: cache
-      uses: actions/cache@v4
-      with:
-        path: ${{ steps.detect.outputs.paths }}
-        key: ${{ runner.os }}-${{ inputs.cache-key-prefix }}-${{ hashFiles('**/bun.lock', '**/bun.lockb') }}
-        restore-keys: |
-          ${{ runner.os }}-${{ inputs.cache-key-prefix }}-
 
     - name: Install dependencies
       shell: bash
